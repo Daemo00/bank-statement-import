@@ -1,6 +1,7 @@
 # Copyright 2019 ForgeFlow, S.L.
 # Copyright 2020 CorporateHub (https://corporatehub.eu)
 # Copyright 2025 Jacques-Etienne Baudoux (BCIM) <je@bcim.be>
+# Copyright 2025 Simone Rubino
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
 import itertools
@@ -13,13 +14,15 @@ from decimal import Decimal
 from io import StringIO
 from os import path
 
+from lxml import etree
+
 from odoo import api, models
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
 try:
-    from csv import reader
+    from csv import reader, writer
 
     import xlrd
     from xlrd.xldate import xldate_as_datetime
@@ -177,6 +180,20 @@ class AccountStatementImportSheetParser(models.TransientModel):
                         self.env._("No valid encoding was found for the attached file")
                     ) from None
                 decoded_file = data_file.decode(detected_encoding)
+
+            is_html = decoded_file.lower().lstrip().startswith("<html>")
+            if is_html:
+                # Convert to CSV and continue import as CSV
+                rows = etree.HTML(decoded_file).xpath("//table//tr")
+
+                csv_content_stream = StringIO()
+                wr = writer(csv_content_stream, **csv_options)
+                wr.writerow([col.text for col in rows[0].xpath("//th")])
+                wr.writerows(
+                    [[col.text for col in row.xpath(".//td")] for row in rows[1:]]
+                )
+                decoded_file = csv_content_stream.getvalue()
+
             csv_or_xlsx = reader(StringIO(decoded_file), **csv_options)
         header = self.parse_header(csv_or_xlsx, mapping)
 
